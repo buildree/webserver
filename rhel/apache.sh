@@ -87,6 +87,24 @@ if [ -e /etc/redhat-release ]; then
         httpd -v
         end_message "Apacheのインストール"
 
+        # Apacheの設定変更
+        start_message "Apache設定"
+        echo "Apacheの設定を変更します..."
+        echo "ドキュメントルートでhtaccessを有効化しています..."
+        echo "実行コマンド:sed -i '/<Directory "\/var\/www\/html">/,/<\/Directory>/s/AllowOverride None/AllowOverride All/' /etc/httpd/conf/httpd.conf"
+        sed -i '/<Directory "\/var\/www\/html">/,/<\/Directory>/s/AllowOverride None/AllowOverride All/' /etc/httpd/conf/httpd.conf
+
+
+        echo "セキュリティ強化のためサーバーバージョン情報を隠しています..."
+        echo "実行コマンド: sed -i -e \"350i #バージョン非表示\" /etc/httpd/conf/httpd.conf"
+        echo "実行コマンド: sed -i -e \"351i ServerTokens ProductOnly\" /etc/httpd/conf/httpd.conf"
+        echo "実行コマンド: sed -i -e \"352i ServerSignature off \n\" /etc/httpd/conf/httpd.conf"
+        sed -i -e "350i #バージョン非表示" /etc/httpd/conf/httpd.conf
+        sed -i -e "351i ServerTokens ProductOnly" /etc/httpd/conf/httpd.conf
+        sed -i -e "352i ServerSignature off \n" /etc/httpd/conf/httpd.conf
+        end_message "Apache設定"
+
+
         # gzip圧縮設定
         cat > /etc/httpd/conf.d/gzip.conf <<'EOF'
 SetOutputFilter DEFLATE
