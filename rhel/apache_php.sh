@@ -1,108 +1,134 @@
 #!/bin/sh
 
-#rootユーザーで実行 or sudo権限ユーザー
-
-<<COMMENT
-作成者：サイトラボ
-URL：https://www.site-lab.jp/
-URL：https://buildree.com/
-
-注意点：conohaのポートは全て許可前提となります。もしくは80番、443番の許可をしておいてください。システムのfirewallはオン状態となります。userユーザーのパスワードはランダム生成となります。最後に表示されます
-
-目的：システム更新+apache2.4系のインストール
-・apache2.4.6or2.4.x
-・mod_sslのインストール
-・PHP8系のインストール
-・userの作成
-
-COMMENT
-
-
+# メッセージ表示関数
 start_message(){
 echo ""
-echo "======================開始======================"
+echo "======================開始: $1 ======================"
 echo ""
 }
 
 end_message(){
 echo ""
-echo "======================完了======================"
+echo "======================完了: $1 ======================"
 echo ""
 }
 
-#user8系か確認
-if [ -e /etc/redhat-release ]; then
-    DIST="redhat"
-    DIST_VER=`cat /etc/redhat-release | sed -e "s/.*\s\([0-9]\)\..*/\1/"`
-    #DIST_VER=`cat /etc/redhat-release | perl -pe 's/.*release ([0-9.]+) .*/$1/' | cut -d "." -f 1`
+# 起動メッセージ
+cat <<EOF
+-----------------------------------------------------
+Buildree Apache インストールスクリプト
+-----------------------------------------------------
+注意点：
+  - AlmaLinux、Rocky Linux、RHEL、CentOS Stream、Oracle Linux専用
+  - rootユーザーまたはsudo権限が必要
+  - 新規環境での使用を推奨
+  - 実行前にバックアップを推奨
 
-    if [ $DIST = "redhat" ];then
-      if [ $DIST_VER = "8" ] || [ $DIST_VER = "9" ];then
+目的：
+  - Apache 2.4系のインストール
+  - SSL設定
+  - gzip圧縮の有効化
+  - htaccess許可
+  - unicornユーザーの自動作成
 
-      #SELinuxの確認
-SElinux=`which getenforce`
-if [ "`${SElinux}`" = "Disabled" ]; then
-  echo "SElinuxは無効なのでそのまま続けていきます"
+ドキュメントルート: /var/www/html
+EOF
+
+read -p "インストールを続行しますか？ (y/n): " choice
+[ "$choice" != "y" ] && { echo "インストールを中止しました。"; exit 0; }
+
+# ディストリビューションとバージョンの検出
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DIST_ID=$ID
+    DIST_VERSION_ID=$VERSION_ID
+    DIST_NAME=$NAME
+    DIST_MAJOR_VERSION=$(echo "$VERSION_ID" | cut -d. -f1)
+elif [ -f /etc/redhat-release ]; then
+    if grep -q "CentOS Stream" /etc/redhat-release; then
+        DIST_ID="centos-stream"
+        DIST_VERSION_ID=$(grep -o -E '[0-9]+(\.[0-9]+)?' /etc/redhat-release | head -1)
+        DIST_MAJOR_VERSION=$(echo "$DIST_VERSION_ID" | cut -d. -f1)
+        DIST_NAME="CentOS Stream"
+    else
+        DIST_ID="redhat"
+        DIST_VERSION_ID=$(grep -o -E '[0-9]+(\.[0-9]+)?' /etc/redhat-release | head -1)
+        DIST_MAJOR_VERSION=$(echo "$DIST_VERSION_ID" | cut -d. -f1)
+        DIST_NAME=$(cat /etc/redhat-release)
+    fi
 else
-  echo "SElinux有効のため、一時的に無効化します"
-  setenforce 0
-
-  getenforce
-  #exit 1
+    echo "サポートされていないディストリビューションです"
+    exit 1
 fi
 
-        #EPELリポジトリのインストール
-        start_message
-        dnf remove -y epel-release
-        dnf -y install epel-release
-        end_message
-
-        #gitリポジトリのインストール
-        start_message
+# RHEL系8/9のみ処理
+if [ -e /etc/redhat-release ]; then
+    DIST_VER=$(cat /etc/redhat-release | sed -e "s/.*\s\([0-9]\)\..*/\1/")
+    
+    if [ "$DIST_VER" = "8" ] || [ "$DIST_VER" = "9" ]; then
+        # Gitリポジトリのインストール
+        start_message "Gitリポジトリのインストール"
         dnf -y install git
-        end_message
+        end_message "Gitリポジトリのインストール"
 
-        start_message
-        if [ $DIST_VER = "8" ];then
+  #EPELリポジトリとremiリポジトリのインストール
+  start_message
+  echo "EPELリポジトリをインストールします"
+  curl --tlsv1.3 --proto https -o /tmp/repository.sh https://raw.githubusercontent.com/buildree/common/main/system/repository.sh
+  chmod +x /tmp/repository.sh
+  source /tmp/repository.sh
+  end_message
+
+
+        # システムアップデート
+        start_message "システムアップデート"
+        curl --tlsv1.3 --proto https -o /tmp/update.sh https://raw.githubusercontent.com/buildree/common/main/system/update.sh
+        chmod +x /tmp/update.sh
+        source /tmp/update.sh
+        rm -f /tmp/update.sh
+        end_message "システムアップデート"
+
+        # Apacheのインストール
+        start_message "Apacheのインストール"
+        dnf install -y httpd mod_ssl
+        httpd -v
+        end_message "Apacheのインストール"
+
+        # gzip圧縮設定
+        cat > /etc/httpd/conf.d/gzip.conf <<'EOF'
+SetOutputFilter DEFLATE
+BrowserMatch ^Mozilla/4 gzip-only-text/html
+BrowserMatch ^Mozilla/4\.0[678] no-gzip
+BrowserMatch \bMSI[E] !no-gzip !gzip-only-text/html
+SetEnvIfNoCase Request_URI\.(?:gif|jpe?g|png)$ no-gzip dont-vary
+Header append Vary User-Agent env=!dont-var
+EOF
+
         
-        #remiリポジトリのインストール
-        dnf install -y dnf-utils http://rpms.remirepo.net/enterprise/remi-release-8.rpm
-        echo "PHP8.2を有効化"
+        #標準のPHPを無効化
+        start_message "標準のPHPを無効化"
+        echo "標準のPHPを無効化してます"
+        echo "dnf module reset php -y"
+        dnf module reset php -y
+        echo "remiリポジトリのPHP8.2を有効化します"
         dnf module enable -y php:remi-8.2
+        echo "dnf module enable -y php:remi-8.2"
+        end_message "標準のPHPを無効化"
 
-        echo "PHP8.2のインストール"
-        dnf install -y php
-        break #強制終了
+        #php8.2をインストール
+        start_message "php8.2をインストール"
+        dnf install -y libzip-devel
+        dnf install -y php php-cli php-fpm php-mbstring php-xml php-json php-mysqlnd php-zip php-gd php-curl php-openssl php-tokenizer php-xmlwriter php-common
+        echo "dnf install -y php php-cli php-fpm php-mbstring php-xml php-json php-mysqlnd php-zip php-gd php-curl php-openssl php-tokenizer php-xmlwriter php-common"
+        end_message "php8.2をインストール"
 
-        elif [ $DIST_VER = "9" ];then
-        #Alma、Rockylinux9の時はこっちを実行
-        echo "remiリポジトリのインストール"
-        dnf install -y dnf-utils http://rpms.remirepo.net/enterprise/remi-release-9.rpm
-        
-        echo "PHP8.2を有効化"
-        dnf module enable -y php:remi-8.2
-
-        echo "PHP8.2のインストール"
-        dnf install -y php
-        break #強制終了
-        else
-        echo "どれでもない"
-        fi
-
-        #必要な拡張モジュールをインストール
-        echo "モジュールのインストール"
-        dnf install -y php-cli php-fpm php-curl php-mysqlnd php-gd php-opcache php-zip php-intl php-common php-bcmath php-imagick php-xmlrpc php-json php-readline php-memcached php-redis php-mbstring php-apcu php-xml php-dom php-redis php-memcached php-memcache
-        end_message
-
-        #php.iniの設定変更
-start_message
-echo "phpのバージョンを非表示にします"
-echo "sed -i -e s|expose_php = On|expose_php = Off| /etc/php.ini"
-sed -i -e "s|expose_php = On|expose_php = Off|" /etc/php.ini
-echo "phpのタイムゾーンを変更"
-echo "sed -i -e s|;date.timezone =|date.timezone = Asia/Tokyo| /etc/php.ini"
-sed -i -e "s|;date.timezone =|date.timezone = Asia/Tokyo|" /etc/php.ini
-end_message
+        #php-fpmで動くように追記
+        start_message "php-fpmで動くように追記"
+        sed -i -e "357i #FastCGI追記" /etc/httpd/conf/httpd.conf
+        sed -i -e "358i <FilesMatch \.php$>" /etc/httpd/conf/httpd.conf
+        sed -i -e '359i     SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost/"' /etc/httpd/conf/httpd.conf
+        sed -i -e "360i </FilesMatch>" /etc/httpd/conf/httpd.conf
+        end_message "php-fpmで動くように追記"
 
 # phpinfoの作成
 start_message
@@ -113,160 +139,62 @@ end_message
 
 
 
-        # dnf updateを実行
-        echo "dnf updateを実行します"
-        echo ""
+        # unicornユーザー作成
+        start_message "unicornユーザー作成"
+        curl --tlsv1.3 --proto https -o /tmp/useradd.sh https://raw.githubusercontent.com/buildree/common/main/user/useradd.sh
+        chmod +x /tmp/useradd.sh
+        source /tmp/useradd.sh
+        rm -f /tmp/useradd.sh
+        end_message "unicornユーザー作成"
 
-        start_message
-        dnf -y update
-        end_message
+        # ドキュメントルート所有者変更
+        start_message "ドキュメントルート所有者変更"
+        chown -R unicorn:apache /var/www/html
+        end_message "ドキュメントルート所有者変更"
 
-        # apacheのインストール
-        echo "apacheをインストールします"
-        dnf  install -y httpd mod_ssl
-
-
-
-        ls /etc/httpd/conf/
-        echo "Apacheのバージョン確認"
-        echo ""
-        httpd -v
-        echo ""
-        end_message
-
-        #gzip圧縮の設定
-        cat >/etc/httpd/conf.d/gzip.conf <<'EOF'
-SetOutputFilter DEFLATE
-BrowserMatch ^Mozilla/4 gzip-only-text/html
-BrowserMatch ^Mozilla/4\.0[678] no-gzip
-BrowserMatch \bMSI[E] !no-gzip !gzip-only-text/html
-SetEnvIfNoCase Request_URI\.(?:gif|jpe?g|png)$ no-gzip dont-vary
-Header append Vary User-Agent env=!dont-var
-EOF
-
-        
-        #PHPのインストール
-        #8と9でリポジトリが違うのでそれぞれでわける
-
-
-        #ユーザー作成
-        start_message
-        echo "ユーザーを作成します"
-        USERNAME='user'
-        PASSWORD=$(more /dev/urandom  | tr -d -c '[:alnum:]' | fold -w 10 | head -1)
-
-        useradd -m -G apache -s /bin/bash "${USERNAME}"
-        echo "${PASSWORD}" | passwd --stdin "${USERNAME}"
-        echo "パスワードは"${PASSWORD}"です。"
-
-        #所属グループ表示
-        echo "所属グループを表示します"
-        getent group apache
-        end_message
-
-        #所有者の変更
-        start_message
-        echo "ドキュメントルートの所有者をuser、グループをapacheにします"
-        chown -R user:apache /var/www/html
-        end_message
-
-        # apacheの起動
-        echo "apacheを起動します"
-        start_message
+        # Apacheサービス設定
+        start_message "Apacheサービス設定"
         systemctl start httpd.service
-
-        echo "apacheのステータス確認"
-        systemctl status httpd.service
-        end_message
-
-        #自動起動の設定
-        start_message
         systemctl enable httpd
         systemctl list-unit-files --type=service | grep httpd
-        end_message
+        end_message "Apacheサービス設定"
 
+        # PHP-fpmのサービス設定
+        start_message "PHP-fpmのサービス設定"
+        systemctl start php-fpm.service
+        systemctl enable php-fpm
+        systemctl list-unit-files --type=service | grep php-fpm
+        end_message "PHP-fpmのサービス設定"
 
-        #firewallのポート許可
-        echo "http(80番)とhttps(443番)の許可をしてます"
-        start_message
+        # ファイアウォール設定
+        start_message "ファイアウォール設定"
         firewall-cmd --permanent --add-service=http
         firewall-cmd --permanent --add-service=https
-        echo ""
-        echo "保存して有効化"
-        echo ""
         firewall-cmd --reload
-
-        echo ""
-        echo "設定を表示"
-        echo ""
         firewall-cmd --list-all
-        end_message
-
-        umask 0002
+        end_message "ファイアウォール設定"
 
         cat <<EOF
-        http://IPアドレス or ドメイン名
-        https://IPアドレス or ドメイン名
-        で確認してみてください
 
-        設定ファイルは
-        /etc/httpd/conf.d/ドメイン名.conf
-        となっています
+Apacheインストール完了！
 
+アクセス方法:
+- http://IPアドレス or ドメイン名
+- https://IPアドレス or ドメイン名
 
-        ドキュメントルート(DR)は
-        /var/www/html
-        となります。
+設定ファイル: /etc/httpd/conf.d/ドメイン名.conf
+ドキュメントルート: /var/www/html
 
-        htaccessはドキュメントルートのみ有効化しています
-
-        有効化の確認
-
-        https://www.logw.jp/server/7452.html
-        vi /var/www/html/.htaccess
-        -----------------
-        AuthType Basic
-        AuthName hoge
-        Require valid-user
-        -----------------
-        ダイアログがでればhtaccessが有効かされた状態となります。
-
-
-        ●HTTP2について
-        SSLのconfファイルに｢Protocols h2 http/1.1｣と追記してください
-        https://www.logw.jp/server/8359.html
-
-        例）
-        <VirtualHost *:443>
-            ServerName logw.jp
-            ServerAlias www.logw.jp
-
-            Protocols h2 http/1.1　←追加
-            DocumentRoot /var/www/html
-
-
-        <Directory /var/www/html/>
-            AllowOverride All
-            Require all granted
-        </Directory>
-
-        </VirtualHost>
-
-        ドキュメントルートの所有者：user
-        グループ：apache
-        になっているため、ユーザー名とグループの変更が必要な場合は変更してください
+注意:
+- HTTP/2を有効にするには、SSLの設定ファイルに「Protocols h2 http/1.1」を追記してください
+- ドキュメントルートの所有者: unicorn
+- ドキュメントルートのグループ: apache
 EOF
 
-        echo "userユーザーのパスワードは"${PASSWORD}"です。"
-      else
-        echo "RedHat系ではないため、このスクリプトは使えません。このスクリプトのインストール対象はRedHat8，9系です。"
-      fi
+    else
+        echo "エラー: このスクリプトはRHEL/CentOS/AlmaLinux/Rocky Linux/Oracle Linux 8または9専用です。"
+        echo "検出されたOS: $DIST_NAME"
+        echo "検出されたOSバージョン: $DIST_MAJOR_VERSION"
+        exit 1
     fi
-
-else
-  echo "このスクリプトのインストール対象はuser7です。user7以外は動きません。"
-  cat <<EOF
-  検証LinuxディストリビューションはDebian・Ubuntu・Fedora・Arch Linux（アーチ・リナックス）となります。
-EOF
 fi
-exec $SHELL -l
