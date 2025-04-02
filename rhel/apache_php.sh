@@ -153,6 +153,20 @@ EOF
         echo "PHP-FPM設定の追加が完了しました"
         end_message "php-fpmで動くように追記"
 
+        # php.iniの設定変更
+        start_message "php.iniの設定"
+        echo "phpのバージョンを非表示にします..."
+        sed -i -e "s|expose_php = On|expose_php = Off|" /etc/php.ini
+        echo "phpのタイムゾーンを変更..."
+        sed -i -e "s|;date.timezone =|date.timezone = Asia/Tokyo|" /etc/php.ini
+        echo "PHPの実行範囲を制限..."
+        sed -i -e "s|;open_basedir =|open_basedir = /var/www/html|" /etc/php.ini
+        echo "ファイルアップロードサイズを設定..."
+        sed -i -e "s|upload_max_filesize = 2M|upload_max_filesize = 64M|" /etc/php.ini
+        sed -i -e "s|post_max_size = 8M|post_max_size = 64M|" /etc/php.ini
+        echo "アップロードサイズを64MBに設定しました"
+        end_message "php.iniの設定"
+
         # phpinfoの作成
         start_message "phpinfoの作成"
         echo "PHPの情報確認用ファイル(info.php)を作成しています..."
@@ -227,7 +241,18 @@ Apacheインストール完了！
 設定ファイル: /etc/httpd/conf.d/ドメイン名.conf
 ドキュメントルート: /var/www/html
 
-注意:
+セキュリティ設定:
+- ディレクトリトラバーサル対応のため、PHP実行範囲をドキュメントルート(/var/www/html)に制限しています
+- ファイルアップロード上限: 64MB
+
+注意事項:
+- WordPressなどでさらに大きなファイルをアップロードしたい場合は以下の方法で変更できます:
+  1. php.ini編集: /etc/php.ini の「upload_max_filesize」と「post_max_size」の値を変更
+  2. .htaccess使用: ドキュメントルート内の.htaccessファイルに以下を追記
+     php_value upload_max_filesize 128M
+     php_value post_max_size 128M
+     php_value memory_limit 256M
+- Apache再起動は不要ですが、PHP-FPMの再起動が必要です: systemctl restart php-fpm
 - HTTP/2を有効にするには、SSLの設定ファイルに「Protocols h2 http/1.1」を追記してください
 - ドキュメントルートの所有者: unicorn
 - ドキュメントルートのグループ: apache
