@@ -32,6 +32,7 @@ Buildree Apache インストールスクリプト
   - PHP 8.2のインストール（remiリポジトリ使用）
   - PHP-FPMの設定
   - unicornユーザーの自動作成
+  - SELinux対応の自動設定
 
 ドキュメントルート: /var/www/html
 EOF
@@ -99,6 +100,13 @@ if [ -e /etc/redhat-release ]; then
         echo "システムアップデートが完了しました"
         end_message "システムアップデート"
 
+        # SELinuxユーティリティのインストール
+        start_message "SELinuxユーティリティのインストール"
+        echo "SELinux管理ツールをインストールしています..."
+        dnf install -y policycoreutils-python-utils
+        echo "SELinux管理ツールのインストールが完了しました"
+        end_message "SELinuxユーティリティのインストール"
+
         # Apacheのインストール
         start_message "Apacheのインストール"
         echo "Apache HTTPサーバーとSSLモジュールをインストールしています..."
@@ -162,9 +170,9 @@ EOF
         echo "PHPの実行範囲を制限..."
         sed -i -e "s|;open_basedir =|open_basedir = /var/www/html|" /etc/php.ini
         echo "ファイルアップロードサイズを設定..."
-        sed -i -e "s|upload_max_filesize = 2M|upload_max_filesize = 64M|" /etc/php.ini
-        sed -i -e "s|post_max_size = 8M|post_max_size = 64M|" /etc/php.ini
-        echo "アップロードサイズを64MBに設定しました"
+        sed -i -e "s|upload_max_filesize = 2M|upload_max_filesize = 32M|" /etc/php.ini
+        sed -i -e "s|post_max_size = 8M|post_max_size = 32M|" /etc/php.ini
+        echo "アップロードサイズを32MBに設定しました"
         end_message "php.iniの設定"
 
         # phpinfoの作成
@@ -176,6 +184,13 @@ EOF
         cat /var/www/html/info.php
         echo "info.phpの作成が完了しました"
         end_message "phpinfoの作成"
+
+        # アップロードディレクトリの作成
+        start_message "アップロードディレクトリの作成"
+        echo "アップロード用ディレクトリを作成しています..."
+        mkdir -p /var/www/html/upload
+        echo "アップロードディレクトリを作成しました"
+        end_message "アップロードディレクトリの作成"
 
         # unicornユーザー作成
         start_message "unicornユーザー作成"
@@ -194,6 +209,35 @@ EOF
         chown -R unicorn:apache /var/www/html
         echo "所有者の変更が完了しました"
         end_message "ドキュメントルート所有者変更"
+
+        # SELinux設定
+        start_message "SELinux設定"
+        # SELinuxの状態を確認
+        SELINUX_STATUS=$(getenforce)
+        echo "現在のSELinux状態: $SELINUX_STATUS"
+        
+        if [ "$SELINUX_STATUS" = "Enforcing" ] || [ "$SELINUX_STATUS" = "Permissive" ]; then
+            echo "SELinuxが有効なため、必要なポリシーを設定します..."
+            
+            # ドキュメントルートのコンテキスト設定
+            echo "ドキュメントルートのSELinuxコンテキストを設定しています..."
+            semanage fcontext -a -t httpd_sys_content_t "/var/www/html(/.*)?"
+            restorecon -Rv /var/www/html
+            
+            # アップロードディレクトリの書き込み許可
+            echo "アップロードディレクトリに書き込み権限を設定しています..."
+            semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/html/upload(/.*)?"
+            restorecon -Rv /var/www/html/upload
+            
+            # PHP-FPMの接続許可
+            echo "PHP-FPMとの接続を許可しています..."
+            setsebool -P httpd_can_network_connect=1
+            
+            echo "SELinuxのポリシー設定が完了しました"
+        else
+            echo "SELinuxが無効なため、ポリシー設定をスキップします"
+        fi
+        end_message "SELinux設定"
 
         # Apacheサービス設定
         start_message "Apacheサービス設定"
@@ -243,15 +287,25 @@ Apacheインストール完了！
 
 セキュリティ設定:
 - ディレクトリトラバーサル対応のため、PHP実行範囲をドキュメントルート(/var/www/html)に制限しています
-- ファイルアップロード上限: 64MB
+- ファイルアップロード上限: 32MB
+- アップロード専用ディレクトリ: /var/www/html/upload（書き込み権限設定済み）
+
+SELinux設定:
+- ドキュメントルート(/var/www/html)には通常のWebコンテンツ用ポリシーを適用
+- アップロードディレクトリ(/var/www/html/upload)には書き込み可能なポリシーを適用
+- PHP-FPMとの接続を許可済み
+
+データベース利用時の注意事項:
+- MySQLなどのデータベースを後からインストールする場合、SELinuxで以下の設定が必要:
+  sudo setsebool -P httpd_can_network_connect_db=1
 
 注意事項:
 - WordPressなどでさらに大きなファイルをアップロードしたい場合は以下の方法で変更できます:
   1. php.ini編集: /etc/php.ini の「upload_max_filesize」と「post_max_size」の値を変更
   2. .htaccess使用: ドキュメントルート内の.htaccessファイルに以下を追記
-     php_value upload_max_filesize 128M
-     php_value post_max_size 128M
-     php_value memory_limit 256M
+     php_value upload_max_filesize 64M
+     php_value post_max_size 64M
+     php_value memory_limit 128M
 - Apache再起動は不要ですが、PHP-FPMの再起動が必要です: systemctl restart php-fpm
 - HTTP/2を有効にするには、SSLの設定ファイルに「Protocols h2 http/1.1」を追記してください
 - ドキュメントルートの所有者: unicorn
