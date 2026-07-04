@@ -29,6 +29,7 @@ Buildree Nginx + PHP インストールスクリプト
 目的：
   - nginxのインストール
   - PHP 8.2のインストール（remiリポジトリ使用、PHP-FPM）
+  - SSL設定（OpenSSLによる自己署名証明書、mod_sslは使用しません）
   - gzip圧縮の有効化
   - サーバーバージョン情報の非表示
   - unicornユーザーの自動作成
@@ -192,6 +193,23 @@ http {
 }
 EOF
 
+    # SSL証明書の作成（OpenSSLによる自己署名証明書。mod_sslは使用しない）
+    start_message "SSL証明書の作成"
+    mkdir -p /etc/nginx/ssl
+    if [ ! -f /etc/nginx/ssl/buildree.crt ]; then
+        CERT_CN=$(hostname -f 2>/dev/null || hostname)
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+            -keyout /etc/nginx/ssl/buildree.key \
+            -out /etc/nginx/ssl/buildree.crt \
+            -subj "/C=JP/ST=Tokyo/L=Tokyo/O=Buildree/CN=${CERT_CN}"
+        chmod 600 /etc/nginx/ssl/buildree.key
+        echo "自己署名証明書を作成しました: /etc/nginx/ssl/buildree.crt"
+        echo "本番運用では正式な証明書(Let's Encrypt等)に差し替えてください"
+    else
+        echo "証明書は既に存在するため作成をスキップしました"
+    fi
+    end_message "SSL証明書の作成"
+
     cat > /etc/nginx/conf.d/buildree.conf <<'EOF'
 server {
     listen       80;
@@ -199,6 +217,35 @@ server {
     server_name  _;
     root         /var/www/html;
     index        index.php index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_pass unix:/run/php-fpm/www.sock;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+
+server {
+    listen       443 ssl;
+    listen       [::]:443 ssl;
+    server_name  _;
+    root         /var/www/html;
+    index        index.php index.html index.htm;
+
+    ssl_certificate     /etc/nginx/ssl/buildree.crt;
+    ssl_certificate_key /etc/nginx/ssl/buildree.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
 
     location / {
         try_files $uri $uri/ =404;
@@ -341,8 +388,10 @@ Nginx + PHPインストール完了！
 - ファイルアップロード上限: 32MB
 
 注意:
-- SSLを有効にする場合は、証明書を配置のうえ /etc/nginx/conf.d/buildree.conf に
-  listen 443 ssl; と ssl_certificate / ssl_certificate_key を追記してください
+- HTTPSはOpenSSLで作成した自己署名証明書で有効化済みです(/etc/nginx/ssl/buildree.crt)
+  ブラウザで警告が出ますが、動作確認目的であればそのまま接続できます
+- 本番運用する場合は、Let's Encrypt等の正式な証明書に差し替えてください
+  （/etc/nginx/conf.d/buildree.conf のssl_certificate / ssl_certificate_keyを変更）
 - php-fpmの設定変更後は systemctl restart php-fpm が必要です
 - ドキュメントルートの所有者: unicorn
 - ドキュメントルートのグループ: nginx

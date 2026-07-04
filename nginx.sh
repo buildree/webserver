@@ -28,6 +28,7 @@ Buildree Nginx インストールスクリプト
 
 目的：
   - nginx 1.20系のインストール
+  - SSL設定（OpenSSLによる自己署名証明書、mod_sslは使用しません）
   - gzip圧縮の有効化
   - サーバーバージョン情報の非表示
   - unicornユーザーの自動作成
@@ -131,6 +132,25 @@ http {
 }
 EOF
 
+        end_message "nginx設定"
+
+        # SSL証明書の作成（OpenSSLによる自己署名証明書。mod_sslは使用しない）
+        start_message "SSL証明書の作成"
+        mkdir -p /etc/nginx/ssl
+        if [ ! -f /etc/nginx/ssl/buildree.crt ]; then
+            CERT_CN=$(hostname -f 2>/dev/null || hostname)
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout /etc/nginx/ssl/buildree.key \
+                -out /etc/nginx/ssl/buildree.crt \
+                -subj "/C=JP/ST=Tokyo/L=Tokyo/O=Buildree/CN=${CERT_CN}"
+            chmod 600 /etc/nginx/ssl/buildree.key
+            echo "自己署名証明書を作成しました: /etc/nginx/ssl/buildree.crt"
+            echo "本番運用では正式な証明書(Let's Encrypt等)に差し替えてください"
+        else
+            echo "証明書は既に存在するため作成をスキップしました"
+        fi
+        end_message "SSL証明書の作成"
+
         echo "Buildree用のサーバーブロックを作成しています..."
         cat > /etc/nginx/conf.d/buildree.conf <<'EOF'
 server {
@@ -144,8 +164,24 @@ server {
         try_files $uri $uri/ =404;
     }
 }
+
+server {
+    listen       443 ssl;
+    listen       [::]:443 ssl;
+    server_name  _;
+    root         /var/www/html;
+    index        index.html index.htm;
+
+    ssl_certificate     /etc/nginx/ssl/buildree.crt;
+    ssl_certificate_key /etc/nginx/ssl/buildree.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
 EOF
-        end_message "nginx設定"
 
         # gzip圧縮設定
         start_message "gzip圧縮設定"
@@ -232,8 +268,10 @@ nginxインストール完了！
 ドキュメントルート: /var/www/html
 
 注意:
-- SSLを有効にする場合は、証明書を配置のうえ /etc/nginx/conf.d/buildree.conf に
-  listen 443 ssl; と ssl_certificate / ssl_certificate_key を追記してください
+- HTTPSはOpenSSLで作成した自己署名証明書で有効化済みです(/etc/nginx/ssl/buildree.crt)
+  ブラウザで警告が出ますが、動作確認目的であればそのまま接続できます
+- 本番運用する場合は、Let's Encrypt等の正式な証明書に差し替えてください
+  （/etc/nginx/conf.d/buildree.conf のssl_certificate / ssl_certificate_keyを変更）
 - ドキュメントルートの所有者: unicorn
 - ドキュメントルートのグループ: nginx
 EOF
