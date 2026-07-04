@@ -65,7 +65,7 @@ fi
 if [ -e /etc/redhat-release ]; then
     DIST_VER=$(cat /etc/redhat-release | sed -e "s/.*\s\([0-9]\)\..*/\1/")
     
-    if [ "$DIST_VER" = "8" ] || [ "$DIST_VER" = "9" ]; then
+    if [ "$DIST_VER" = "8" ] || [ "$DIST_VER" = "9" ] || [ "$DIST_VER" = "10" ]; then
         # Gitリポジトリのインストール
         start_message "Gitリポジトリのインストール"
         dnf -y install git
@@ -161,7 +161,7 @@ Apacheインストール完了！
 EOF
 
     else
-        echo "エラー: このスクリプトはRHEL/CentOS/AlmaLinux/Rocky Linux/Oracle Linux 8または9専用です。"
+        echo "エラー: このスクリプトはRHEL/CentOS/AlmaLinux/Rocky Linux/Oracle Linux 8、9または10専用です。"
         echo "検出されたOS: $DIST_NAME"
         echo "検出されたOSバージョン: $DIST_MAJOR_VERSION"
         exit 1
