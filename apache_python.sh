@@ -55,7 +55,7 @@ echo ""
 }
 
 hash_file="/tmp/hashes.txt"
-expected_sha3_512="e8243148d093f686fb29d2a612a01f9189796f0d9ed07b485da6872709aa7f2449e9d866fbb8026a19f118e44c5a14a3546c15de4fc7cb4de001af607a09cb3f"
+expected_sha3_512="efbdceddcbeb6c3dd41cfde3cab4cda01208cab2bbb932696562e006af9fc5ef7965e6bd6ff9ab4fd154385e4fad5b16ce7374be19750175cf1e8804b94372ec"
 
 # リポジトリのシェルファイルの格納場所
 update_file_path="/tmp/update.sh"
