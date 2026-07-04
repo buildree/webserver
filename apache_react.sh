@@ -45,14 +45,6 @@ read -p "Reactプロジェクト名を入力してください (デフォルト:
 PROJECT_NAME=${PROJECT_NAME:-buildree-app}
 echo "プロジェクト名: $PROJECT_NAME"
 
-hash_file="/tmp/hashes.txt"
-expected_sha3_512="efbdceddcbeb6c3dd41cfde3cab4cda01208cab2bbb932696562e006af9fc5ef7965e6bd6ff9ab4fd154385e4fad5b16ce7374be19750175cf1e8804b94372ec"
-
-# リポジトリのシェルファイルの格納場所
-update_file_path="/tmp/update.sh"
-useradd_file_path="/tmp/useradd.sh"
-
-
 # ディストリビューションとバージョンの検出
 if [ -f /etc/os-release ]; then
   . /etc/os-release
@@ -83,44 +75,6 @@ echo "検出されたディストリビューション: $DIST_NAME $DIST_VERSION
 # Redhat系で8、9または10の場合のみ処理を実行
 if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_VERSION" -eq 9 || "$DIST_MAJOR_VERSION" -eq 10 ]]; then
 
-        # ハッシュファイルのダウンロード
-        start_message "ハッシュ検証ファイルのダウンロード"
-        if ! curl --tlsv1.3 --proto https -o "$hash_file" https://raw.githubusercontent.com/buildree/common/main/other/hashes.txt; then
-            echo "エラー: ファイルのダウンロードに失敗しました"
-            exit 1
-        fi
-
-        # ファイルのSHA3-512ハッシュ値を計算
-        actual_sha3_512=$(sha3sum -a 512 "$hash_file" 2>/dev/null | awk '{print $1}')
-        # sha3sumコマンドが存在しない場合の代替手段
-        if [ -z "$actual_sha3_512" ]; then
-            actual_sha3_512=$(openssl dgst -sha3-512 "$hash_file" 2>/dev/null | awk '{print $2}')
-
-            if [ -z "$actual_sha3_512" ]; then
-                echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください。"
-                rm -f "$hash_file"
-                exit 1
-            fi
-        fi
-
-        # ハッシュ値を比較
-        if [ "$actual_sha3_512" == "$expected_sha3_512" ]; then
-            echo "ハッシュ値は一致します。ファイルを保存します。"
-            
-            # ハッシュ値ファイルの読み込み - ダウンロード成功後に行う
-            update_hash=$(grep "^update_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
-            update_hash_sha3=$(grep "^update_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
-            useradd_hash=$(grep "^useradd_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
-            useradd_hash_sha3=$(grep "^useradd_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
-        else
-            echo "ハッシュ値が一致しません。ファイルを削除します。"
-            echo "期待されるSHA3-512: $expected_sha3_512"
-            echo "実際のSHA3-512: $actual_sha3_512"
-            rm -f "$hash_file"
-            exit 1
-        fi
-        end_message "ハッシュ検証ファイルのダウンロード"
-
     # Gitリポジトリのインストール
     start_message "Gitリポジトリのインストール"
     echo "Gitをインストールしています..."
@@ -128,67 +82,10 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
     echo "Gitのインストールが完了しました"
     end_message "Gitリポジトリのインストール"
 
-        # dnf updateを実行
+        # システムアップデート
         start_message "システムアップデート"
-        echo "システムをアップデートします"
-        # アップデートスクリプトをGitHubから/tmpにダウンロードして実行
-        if ! curl --tlsv1.3 --proto https -o "$update_file_path" https://raw.githubusercontent.com/buildree/common/main/system/update.sh; then
-            echo "エラー: ファイルのダウンロードに失敗しました"
-            exit 1
-        fi
-
-        # ファイルの存在を確認
-        if [ ! -f "$update_file_path" ]; then
-            echo "エラー: ダウンロードしたファイルが見つかりません: $update_file_path"
-            exit 1
-        fi
-
-        # ファイルのSHA512ハッシュ値を計算
-        actual_sha512=$(sha512sum "$update_file_path" 2>/dev/null | awk '{print $1}')
-        if [ -z "$actual_sha512" ]; then
-            echo "エラー: SHA512ハッシュの計算に失敗しました"
-            exit 1
-        fi
-
-        # ファイルのSHA3-512ハッシュ値を計算
-        actual_sha3_512=$(sha3sum -a 512 "$update_file_path" 2>/dev/null | awk '{print $1}')
-
-        # システムにsha3sumがない場合の代替手段
-        if [ -z "$actual_sha3_512" ]; then
-            # OpenSSLを使用する方法
-            actual_sha3_512=$(openssl dgst -sha3-512 "$update_file_path" 2>/dev/null | awk '{print $2}')
-            
-            # それでも取得できない場合はエラー
-            if [ -z "$actual_sha3_512" ]; then
-                echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
-                exit 1
-            fi
-        fi
-
-        # 両方のハッシュ値が一致した場合のみ処理を続行
-        if [ "$actual_sha512" == "$update_hash" ] && [ "$actual_sha3_512" == "$update_hash_sha3" ]; then
-            echo "両方のハッシュ値が一致します。"
-            echo "このスクリプトは安全のためインストール作業を実施します"
-            
-            # 実行権限を付与
-            chmod +x "$update_file_path"
-            
-            # スクリプトを実行
-            source "$update_file_path"
-            
-            # 実行後に削除
-            rm -f "$update_file_path"
-        else
-            echo "ハッシュ値が一致しません！"
-            echo "期待されるSHA512: $update_hash"
-            echo "実際のSHA512: $actual_sha512"
-            echo "期待されるSHA3-512: $update_hash_sha3"
-            echo "実際のSHA3-512: $actual_sha3_512"
-            
-            # セキュリティリスクを軽減するため、検証に失敗したファイルを削除
-            rm -f "$update_file_path"
-            exit 1 #一致しない場合は終了
-        fi
+        echo "システムを最新版に更新します"
+        dnf -y update
         end_message "システムアップデート"
 
     # SELinuxの状態確認（ツールのインストールの代わりにチェックのみ実行）
@@ -277,63 +174,38 @@ EOF
         start_message "unicornユーザーの作成"
         echo "unicornユーザーを作成します"
 
-        # ユーザー作成スクリプトをダウンロード
-        if ! curl --tlsv1.3 --proto https -o "$useradd_file_path" https://raw.githubusercontent.com/buildree/common/main/user/useradd.sh; then
-            echo "エラー: ファイルのダウンロードに失敗しました"
+        USERNAME='unicorn'
+        PASSWORD=$(< /dev/urandom tr -dc '[:alnum:]' | head -c32)
+
+        useradd -m -s /bin/bash $USERNAME
+        if [ $? -ne 0 ]; then
+            echo "ユーザー作成に失敗しました。"
             exit 1
         fi
+        echo "$PASSWORD" | passwd --stdin $USERNAME
 
-        # ファイルの存在を確認
-        if [ ! -f "$useradd_file_path" ]; then
-            echo "エラー: ダウンロードしたファイルが見つかりません: $useradd_file_path"
-            exit 1
-        fi
+        mkdir -p /home/${USERNAME}/.ssh
+        chmod 700 /home/${USERNAME}/.ssh
+        ssh-keygen -t ed25519 -N "" -f /home/${USERNAME}/.ssh/${USERNAME}
+        chmod 644 /home/${USERNAME}/.ssh/${USERNAME}.pub
+        chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
+        cat /home/${USERNAME}/.ssh/${USERNAME}.pub >> /home/${USERNAME}/.ssh/authorized_keys
+        chmod 600 /home/${USERNAME}/.ssh/authorized_keys
+        chmod 600 /home/${USERNAME}/.ssh/${USERNAME}
+        cp /home/${USERNAME}/.ssh/${USERNAME} /home/${USERNAME}/
+        chown ${USERNAME}:${USERNAME} /home/${USERNAME}/${USERNAME}
+        rm /home/${USERNAME}/.ssh/${USERNAME}
 
-        # ファイルのSHA512ハッシュ値を計算
-        actual_sha512=$(sha512sum "$useradd_file_path" 2>/dev/null | awk '{print $1}')
-        if [ -z "$actual_sha512" ]; then
-            echo "エラー: SHA512ハッシュの計算に失敗しました"
-            exit 1
-        fi
-
-        # ファイルのSHA3-512ハッシュ値を計算
-        actual_sha3_512=$(sha3sum -a 512 "$useradd_file_path" 2>/dev/null | awk '{print $1}')
-
-        # システムにsha3sumがない場合の代替手段
-        if [ -z "$actual_sha3_512" ]; then
-            # OpenSSLを使用する方法
-            actual_sha3_512=$(openssl dgst -sha3-512 "$useradd_file_path" 2>/dev/null | awk '{print $2}')
-            
-            # それでも取得できない場合はエラー
-            if [ -z "$actual_sha3_512" ]; then
-                echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
-                exit 1
-            fi
-        fi
-
-        # 両方のハッシュ値が一致した場合のみ処理を続行
-        if [ "$actual_sha512" == "$useradd_hash" ] && [ "$actual_sha3_512" == "$useradd_hash_sha3" ]; then
-            echo "ハッシュ検証が成功しました。ユーザー作成を続行します。"
-            
-            # 実行権限を付与
-            chmod +x "$useradd_file_path"
-            
-            # スクリプトを実行
-            source "$useradd_file_path"
-            
-            # 実行後に削除
-            rm -f "$useradd_file_path"
-        else
-            echo "エラー: ハッシュ検証に失敗しました。"
-            echo "期待されるSHA512: $useradd_hash"
-            echo "実際のSHA512: $actual_sha512"
-            echo "期待されるSHA3-512: $useradd_hash_sha3"
-            echo "実際のSHA3-512: $actual_sha3_512"
-            
-            # セキュリティリスクを軽減するため、検証に失敗したファイルを削除
-            rm -f "$useradd_file_path"
-            exit 1
-        fi
+        echo "ed25519 SSH鍵が生成されました。"
+        echo "秘密鍵: /home/${USERNAME}/${USERNAME}"
+        echo "公開鍵: /home/${USERNAME}/.ssh/${USERNAME}.pub"
+        echo "秘密鍵が /home/${USERNAME}/${USERNAME} に移動されました。"
+        echo "秘密鍵のパーミッションは 600 に設定されています。"
+        echo "このファイルを安全な方法でクライアントマシンに移動し、サーバーからは削除することを強く推奨します。"
+        echo "秘密鍵はサーバー上に保管せず、使用するクライアントマシンにのみ保管してください。"
+        echo "公開鍵をクライアントマシンの ~/.ssh/authorized_keys ファイルに追加してください。"
+        echo "必要に応じて、秘密鍵にパスフレーズを設定してください。"
+        echo "ユーザーのパスワードはランダムで生成されています。セキュリティの関係上表示したりファイルに残していないので新しく設定してください。"
         end_message "unicornユーザーの作成"
 
 # Reactアプリケーションのインストール
