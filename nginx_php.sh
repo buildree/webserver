@@ -123,8 +123,19 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
     dnf -y update
     end_message "システムアップデート"
 
-    # nginxのインストール
+    # nginxのインストール（公式リポジトリの安定版を使用）
+    # AlmaLinux8のAppStream同梱nginxは1.14系(EOL)のため、
+    # nginx.org公式リポジトリから最新安定版を導入する
     start_message "nginxのインストール"
+    cat > /etc/yum.repos.d/nginx.repo <<'EOF'
+[nginx-stable]
+name=nginx stable repo
+baseurl=https://nginx.org/packages/centos/$releasever/$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+module_hotfixes=true
+EOF
     dnf install -y nginx
     nginx -v
     end_message "nginxのインストール"
@@ -160,6 +171,8 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
     # nginx.confをBuildree用に書き換え
     start_message "nginx設定"
     cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.orig
+    # 公式リポジトリ版が置くデフォルトのserverブロックを無効化（80番の競合防止）
+    [ -f /etc/nginx/conf.d/default.conf ] && mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled
     cat > /etc/nginx/nginx.conf <<'EOF'
 user nginx;
 worker_processes auto;
