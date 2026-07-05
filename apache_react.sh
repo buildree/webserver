@@ -1,16 +1,25 @@
 #!/bin/sh
 
 # メッセージ表示関数
+EXECUTED_STEPS=""
+WARNINGS=""
+
 start_message() {
     echo ""
     echo "======================開始: $1 ======================"
     echo ""
+    EXECUTED_STEPS="${EXECUTED_STEPS}- $1"$'\n'
 }
 
 end_message() {
     echo ""
     echo "======================完了: $1 ======================"
     echo ""
+}
+
+warn_message() {
+    echo "警告: $1"
+    WARNINGS="${WARNINGS}- $1"$'\n'
 }
 
 # 起動メッセージ
@@ -255,7 +264,7 @@ EOF
 chown -R unicorn:apache /var/www/html
 
     echo "Apache設定の更新が完了しました"
-    end_message "Apache設定の更新"
+    end_message "Reactアプリケーションのインストール"
 
     # ドキュメントルート所有者変更
     start_message "ドキュメントルート所有者変更"
@@ -284,10 +293,10 @@ chown -R unicorn:apache /var/www/html
         
         echo "SELinuxのポリシー設定が完了しました"
     elif [ "$SELINUX_STATUS" = "Permissive" ]; then
-        echo "SELinuxはPermissive状態です。必要に応じてEnforcing状態に変更してください。"
+        warn_message "SELinuxはPermissive状態です。必要に応じてEnforcing状態に変更してください。"
         echo "※Enforcing状態に変更する場合は、再度このスクリプトを実行するか、SELinuxポリシーを手動で設定してください。"
     else
-        echo "SELinuxが無効またはインストールされていないため、SELinuxポリシー設定をスキップします"
+        warn_message "SELinuxが無効またはインストールされていないため、SELinuxポリシー設定をスキップします"
     fi
     end_message "SELinux設定"
 
@@ -315,10 +324,33 @@ chown -R unicorn:apache /var/www/html
     echo "ファイアウォール設定が完了しました"
     end_message "ファイアウォール設定"
 
-    cat <<EOF
+    build_summary() {
+        cat <<SUMMARYEOF
+Buildree インストールサマリー - $(date '+%Y-%m-%d %H:%M:%S')
 
-Apache & React (Vite + TypeScript) インストール完了！
+======================実行内容サマリー======================
+${EXECUTED_STEPS}
+======================作成・変更したファイル======================
+- /etc/httpd/conf/httpd.conf (設定変更: AllowOverride All、ServerTokens/ServerSignature追加)
+- /etc/httpd/conf.d/gzip.conf (新規作成: gzip圧縮設定)
+- /var/www/$PROJECT_NAME/ (新規作成: Vite + React + TypeScriptプロジェクトソース)
+- /var/www/html/ (既存ファイル削除後、Reactビルド成果物(dist)を配置)
+- /var/www/html/.htaccess (新規作成: SPAルーティング用フォールバック設定)
+- /var/www/html (所有者変更: unicorn:apache、SELinuxコンテキスト設定はEnforcing時のみ)
+- /home/${USERNAME}/${USERNAME} (新規作成: SSH秘密鍵)
+- /home/${USERNAME}/.ssh/${USERNAME}.pub (新規作成: SSH公開鍵)
+- /home/${USERNAME}/.ssh/authorized_keys (新規作成: 公開鍵登録)
 
+======================unicornユーザーの認証情報======================
+- ログイン方式: SSH鍵認証(ed25519)
+- 秘密鍵: /home/unicorn/${USERNAME}  (パーミッション600)
+- 公開鍵: /home/unicorn/.ssh/${USERNAME}.pub
+- OSログインパスワードはランダム生成後、画面表示・ファイル保存はしていません(セキュリティのため)。必要な場合は passwd unicorn で再設定してください。
+
+======================警告======================
+$( [ -n "$WARNINGS" ] && printf '%s' "$WARNINGS" || echo "警告はありませんでした" )
+
+======================アクセス方法・注意事項======================
 アクセス方法:
 - http://IPアドレス or ドメイン名
 - https://IPアドレス or ドメイン名（mod_sslの自己署名証明書で有効）
@@ -346,7 +378,16 @@ SELinux設定:
 - HTTP/2を有効にするには、SSLの設定ファイルに「Protocols h2 http/1.1」を追記してください
 - ドキュメントルートの所有者: unicorn
 - ドキュメントルートのグループ: apache
-EOF
+SUMMARYEOF
+    }
+
+    SUMMARY_TEXT=$(build_summary)
+    echo "$SUMMARY_TEXT"
+    echo "$SUMMARY_TEXT" > /home/unicorn/buildree_install_summary.txt
+    chown unicorn:unicorn /home/unicorn/buildree_install_summary.txt
+    chmod 600 /home/unicorn/buildree_install_summary.txt
+    echo ""
+    echo "このサマリーは /home/unicorn/buildree_install_summary.txt に保存されました。"
 
 else
     echo "エラー: このスクリプトはRHEL/CentOS/AlmaLinux/Rocky Linux/Oracle Linux 8、9または10専用です。"

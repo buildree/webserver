@@ -1,16 +1,25 @@
 #!/bin/sh
 
 # メッセージ表示関数
+EXECUTED_STEPS=""
+WARNINGS=""
+
 start_message(){
 echo ""
 echo "======================開始: $1 ======================"
 echo ""
+EXECUTED_STEPS="${EXECUTED_STEPS}- $1"$'\n'
 }
 
 end_message(){
 echo ""
 echo "======================完了: $1 ======================"
 echo ""
+}
+
+warn_message(){
+echo "警告: $1"
+WARNINGS="${WARNINGS}- $1"$'\n'
 }
 
 # 起動メッセージ
@@ -28,7 +37,7 @@ Buildree Nginx + PHP インストールスクリプト
 
 目的：
   - nginxのインストール
-  - PHP 8.2のインストール（remiリポジトリ使用、PHP-FPM）
+  - PHP 8.5のインストール（remiリポジトリ使用、PHP-FPM）
   - SSL設定（OpenSSLによる自己署名証明書、mod_sslは使用しません）
   - gzip圧縮の有効化
   - サーバーバージョン情報の非表示
@@ -97,7 +106,7 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
             GPG_KEY="https://yum.oracle.com/RPM-GPG-KEY-oracle-ol$DIST_VERSION_ID"
             ;;
         *)
-            echo "警告: 認識されないディストリビューションですが、処理を続行します"
+            warn_message "認識されないディストリビューションですが、処理を続行します"
             GPG_KEY="https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux"
             ;;
     esac
@@ -140,19 +149,19 @@ EOF
     nginx -v
     end_message "nginxのインストール"
 
-    # PHPを無効化してremiのPHP8.2を有効化
-    start_message "PHP8.2の有効化"
+    # PHPを無効化してremiのPHP8.5を有効化
+    start_message "PHP8.5の有効化"
     dnf module reset php -y
-    echo "remiリポジトリのPHP8.2を有効化しています..."
-    dnf module enable -y php:remi-8.2
-    end_message "PHP8.2の有効化"
+    echo "remiリポジトリのPHP8.5を有効化しています..."
+    dnf module enable -y php:remi-8.5
+    end_message "PHP8.5の有効化"
 
-    # PHP8.2をインストール
-    start_message "PHP8.2をインストール"
+    # PHP8.5をインストール
+    start_message "PHP8.5をインストール"
     dnf install -y libzip-devel
     dnf install -y php php-cli php-fpm php-mbstring php-xml php-json php-mysqlnd php-zip php-gd php-curl php-opcache php-common
     php -v
-    end_message "PHP8.2をインストール"
+    end_message "PHP8.5をインストール"
 
     # ドキュメントルートの作成
     # nginxはApacheと異なりautoindexがデフォルトOFFのため、
@@ -346,7 +355,7 @@ EOF
         setsebool -P httpd_can_network_connect=1
         setsebool -P httpd_enable_homedirs=1
     else
-        echo "SELinuxはEnforcing状態ではないため、追加のポリシー設定はスキップします"
+        warn_message "SELinuxはEnforcing状態ではないため、追加のポリシー設定はスキップします"
     fi
     end_message "SELinuxの状態確認"
 
@@ -418,10 +427,39 @@ EOF
     firewall-cmd --list-all
     end_message "ファイアウォール設定"
 
-    cat <<EOF
+    build_summary() {
+        cat <<SUMMARYEOF
+Buildree インストールサマリー - $(date '+%Y-%m-%d %H:%M:%S')
 
-Nginx + PHPインストール完了！
+======================実行内容サマリー======================
+${EXECUTED_STEPS}
+======================作成・変更したファイル======================
+- /etc/yum.repos.d/nginx.repo (新規作成: nginx公式リポジトリ)
+- /var/www/html/index.html (新規作成: 初期ドキュメントルート)
+- /etc/php-fpm.d/www.conf (上書き: nginxユーザーで動作するPHP-FPMプール設定、元ファイルは/etc/php-fpm.d/www.conf.origに保存)
+- /etc/nginx/nginx.conf (上書き: Buildree用設定、元ファイルは/etc/nginx/nginx.conf.origに保存)
+- /etc/nginx/conf.d/default.conf.disabled (リネーム: 同梱デフォルトserverブロックの無効化、存在した場合のみ)
+- /etc/nginx/ssl/buildree.crt / buildree.key (新規作成: 自己署名SSL証明書、既存の場合はスキップ)
+- /etc/nginx/conf.d/buildree.conf (新規作成: Buildree用serverブロック、PHP-FPM連携含む)
+- /etc/nginx/conf.d/gzip.conf (新規作成: gzip圧縮設定)
+- /etc/php.ini (設定変更: expose_php/timezone/open_basedir/upload_max_filesize/post_max_size)
+- /var/www/html/info.php (新規作成: phpinfo確認用)
+- /etc/systemd/system/nginx.service.d/override.conf (新規作成: 起動前にnginx.pidを削除するExecStartPre設定)
+- /var/www/html (所有者変更: unicorn:nginx、パーミッション750、SELinuxコンテキスト設定はEnforcing時のみ)
+- /home/${USERNAME}/${USERNAME} (新規作成: SSH秘密鍵)
+- /home/${USERNAME}/.ssh/${USERNAME}.pub (新規作成: SSH公開鍵)
+- /home/${USERNAME}/.ssh/authorized_keys (新規作成: 公開鍵登録)
 
+======================unicornユーザーの認証情報======================
+- ログイン方式: SSH鍵認証(ed25519)
+- 秘密鍵: /home/unicorn/${USERNAME}  (パーミッション600)
+- 公開鍵: /home/unicorn/.ssh/${USERNAME}.pub
+- OSログインパスワードはランダム生成後、画面表示・ファイル保存はしていません(セキュリティのため)。必要な場合は passwd unicorn で再設定してください。
+
+======================警告======================
+$( [ -n "$WARNINGS" ] && printf '%s' "$WARNINGS" || echo "警告はありませんでした" )
+
+======================アクセス方法・注意事項======================
 アクセス方法:
 - http://IPアドレス or ドメイン名
 - https://IPアドレス or ドメイン名
@@ -446,7 +484,16 @@ PHPの動作確認:
 - php-fpmの設定変更後は systemctl restart php-fpm が必要です
 - ドキュメントルートの所有者: unicorn
 - ドキュメントルートのグループ: nginx
-EOF
+SUMMARYEOF
+    }
+
+    SUMMARY_TEXT=$(build_summary)
+    echo "$SUMMARY_TEXT"
+    echo "$SUMMARY_TEXT" > /home/unicorn/buildree_install_summary.txt
+    chown unicorn:unicorn /home/unicorn/buildree_install_summary.txt
+    chmod 600 /home/unicorn/buildree_install_summary.txt
+    echo ""
+    echo "このサマリーは /home/unicorn/buildree_install_summary.txt に保存されました。"
 
 else
     echo "エラー: このスクリプトはRHEL/CentOS/AlmaLinux/Rocky Linux/Oracle Linux 8、9または10専用です。"

@@ -1,16 +1,25 @@
 #!/bin/sh
 
 # メッセージ表示関数
+EXECUTED_STEPS=""
+WARNINGS=""
+
 start_message() {
     echo ""
     echo "======================開始: $1 ======================"
     echo ""
+    EXECUTED_STEPS="${EXECUTED_STEPS}- $1"$'\n'
 }
 
 end_message() {
     echo ""
     echo "======================完了: $1 ======================"
     echo ""
+}
+
+warn_message() {
+    echo "警告: $1"
+    WARNINGS="${WARNINGS}- $1"$'\n'
 }
 
 # 起動メッセージ
@@ -29,7 +38,7 @@ Buildree Apache インストールスクリプト
   - SSL設定
   - gzip圧縮の有効化
   - htaccess許可
-  - PHP 8.2のインストール（remiリポジトリ使用）
+  - PHP 8.5のインストール（remiリポジトリ使用）
   - PHP-FPMの設定
   - unicornユーザーの自動作成
   - SELinux対応の自動設定
@@ -98,7 +107,7 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
             GPG_KEY="https://yum.oracle.com/RPM-GPG-KEY-oracle-ol$DIST_VERSION_ID"
             ;;
         *)
-            echo "警告: 認識されないディストリビューションですが、処理を続行します"
+            warn_message "認識されないディストリビューションですが、処理を続行します"
             GPG_KEY="https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux"
             ;;
     esac
@@ -119,10 +128,10 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
     end_message "EPELリポジトリとremiリポジトリのインストール"
 
         # システムアップデート
-        start_message
+        start_message "システムアップデート"
         echo "システムを最新版に更新します"
         dnf -y update
-        end_message
+        end_message "システムアップデート"
 
     # SELinuxの状態確認（ツールのインストールの代わりにチェックのみ実行）
     start_message "SELinuxの状態確認"
@@ -172,22 +181,22 @@ EOF
     start_message "標準のPHPを無効化"
     echo "標準のPHPモジュールをリセットしています..."
     dnf module reset php -y
-    echo "remiリポジトリのPHP8.2を有効化しています..."
-    dnf module enable -y php:remi-8.2
-    echo "PHP8.2モジュールの有効化が完了しました"
+    echo "remiリポジトリのPHP8.5を有効化しています..."
+    dnf module enable -y php:remi-8.5
+    echo "PHP8.5モジュールの有効化が完了しました"
     end_message "標準のPHPを無効化"
 
-    # PHP8.2をインストール
-    start_message "PHP8.2をインストール"
+    # PHP8.5をインストール
+    start_message "PHP8.5をインストール"
     echo "PHPの依存ライブラリ(libzip-devel)をインストールしています..."
     dnf install -y libzip-devel
-    echo "PHP8.2と必要なモジュールをインストールしています..."
+    echo "PHP8.5と必要なモジュールをインストールしています..."
     echo "インストール中のパッケージ: php php-cli php-fpm php-mbstring php-xml php-json php-mysqlnd php-zip php-gd php-curl php-openssl php-tokenizer php-xmlwriter php-common"
     dnf install -y php php-cli php-fpm php-mbstring php-xml php-json php-mysqlnd php-zip php-gd php-curl php-openssl php-tokenizer php-xmlwriter php-common
-    echo "PHP8.2のインストールが完了しました"
+    echo "PHP8.5のインストールが完了しました"
     echo "インストールされたPHPのバージョン:"
     php -v
-    end_message "PHP8.2をインストール"
+    end_message "PHP8.5をインストール"
 
     # php-fpmで動くように追記
     start_message "php-fpmで動くように追記"
@@ -232,7 +241,7 @@ EOF
     end_message "アップロードディレクトリの作成"
 
         # ユーザーを作成
-        start_message
+        start_message "unicornユーザー作成"
         echo "unicornユーザーを作成します"
 
         USERNAME='unicorn'
@@ -267,7 +276,7 @@ EOF
         echo "公開鍵をクライアントマシンの ~/.ssh/authorized_keys ファイルに追加してください。"
         echo "必要に応じて、秘密鍵にパスフレーズを設定してください。"
         echo "ユーザーのパスワードはランダムで生成されています。セキュリティの関係上表示したりファイルに残していないので新しく設定してください。"
-        end_message
+        end_message "unicornユーザー作成"
 
     # ドキュメントルート所有者変更
     start_message "ドキュメントルート所有者変更"
@@ -301,10 +310,10 @@ EOF
         
         echo "SELinuxのポリシー設定が完了しました"
     elif [ "$SELINUX_STATUS" = "Permissive" ]; then
-        echo "SELinuxはPermissive状態です。必要に応じてEnforcing状態に変更してください。"
+        warn_message "SELinuxはPermissive状態です。必要に応じてEnforcing状態に変更してください。"
         echo "※Enforcing状態に変更する場合は、再度このスクリプトを実行するか、SELinuxポリシーを手動で設定してください。"
     else
-        echo "SELinuxが無効またはインストールされていないため、SELinuxポリシー設定をスキップします"
+        warn_message "SELinuxが無効またはインストールされていないため、SELinuxポリシー設定をスキップします"
     fi
     end_message "SELinux設定"
 
@@ -343,10 +352,34 @@ EOF
     echo "ファイアウォール設定が完了しました"
     end_message "ファイアウォール設定"
 
-    cat <<EOF
+    build_summary() {
+        cat <<SUMMARYEOF
+Buildree インストールサマリー - $(date '+%Y-%m-%d %H:%M:%S')
 
-Apacheインストール完了！
+======================実行内容サマリー======================
+${EXECUTED_STEPS}
+======================作成・変更したファイル======================
+- /etc/httpd/conf/httpd.conf (設定変更: PHP-FPM用FastCGIハンドラー追加)
+- /etc/httpd/conf.d/gzip.conf (新規作成: gzip圧縮設定)
+- /etc/php.ini (設定変更: expose_php/timezone/open_basedir/upload_max_filesize/post_max_size)
+- /var/www/html/info.php (新規作成: phpinfo確認用)
+- /var/www/html/upload (新規作成: アップロード用ディレクトリ)
+- /var/www/html (所有者変更: unicorn:apache、SELinuxコンテキスト設定はEnforcing時のみ)
+- /var/www/html/upload (SELinuxコンテキスト設定: httpd_sys_rw_content_t、Enforcing時のみ)
+- /home/${USERNAME}/${USERNAME} (新規作成: SSH秘密鍵)
+- /home/${USERNAME}/.ssh/${USERNAME}.pub (新規作成: SSH公開鍵)
+- /home/${USERNAME}/.ssh/authorized_keys (新規作成: 公開鍵登録)
 
+======================unicornユーザーの認証情報======================
+- ログイン方式: SSH鍵認証(ed25519)
+- 秘密鍵: /home/unicorn/${USERNAME}  (パーミッション600)
+- 公開鍵: /home/unicorn/.ssh/${USERNAME}.pub
+- OSログインパスワードはランダム生成後、画面表示・ファイル保存はしていません(セキュリティのため)。必要な場合は passwd unicorn で再設定してください。
+
+======================警告======================
+$( [ -n "$WARNINGS" ] && printf '%s' "$WARNINGS" || echo "警告はありませんでした" )
+
+======================アクセス方法・注意事項======================
 アクセス方法:
 - http://IPアドレス or ドメイン名
 - https://IPアドレス or ドメイン名
@@ -389,7 +422,16 @@ SELinux設定:
 - HTTP/2を有効にするには、SSLの設定ファイルに「Protocols h2 http/1.1」を追記してください
 - ドキュメントルートの所有者: unicorn
 - ドキュメントルートのグループ: apache
-EOF
+SUMMARYEOF
+    }
+
+    SUMMARY_TEXT=$(build_summary)
+    echo "$SUMMARY_TEXT"
+    echo "$SUMMARY_TEXT" > /home/unicorn/buildree_install_summary.txt
+    chown unicorn:unicorn /home/unicorn/buildree_install_summary.txt
+    chmod 600 /home/unicorn/buildree_install_summary.txt
+    echo ""
+    echo "このサマリーは /home/unicorn/buildree_install_summary.txt に保存されました。"
 
 else
     echo "エラー: このスクリプトはRHEL/CentOS/AlmaLinux/Rocky Linux/Oracle Linux 8、9または10専用です。"
