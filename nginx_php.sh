@@ -160,12 +160,26 @@ EOF
     end_message "ドキュメントルートの作成"
 
     # php-fpmプールをnginxユーザーで動くように設定
+    # (remiのデフォルトwww.confをsedで書き換える方式は、行の表記が
+    #  想定と少しでも違うと無反応で失敗するため、確実に反映されるよう
+    #  ファイルごと上書きする)
     start_message "php-fpmプールの設定"
-    sed -i -e "s|^user = apache|user = nginx|" /etc/php-fpm.d/www.conf
-    sed -i -e "s|^group = apache|group = nginx|" /etc/php-fpm.d/www.conf
-    sed -i -e "s|^listen.acl_users = apache|listen.acl_users = nginx|" /etc/php-fpm.d/www.conf
-    sed -i -e "s|^;listen.owner = nobody|listen.owner = nginx|" /etc/php-fpm.d/www.conf
-    sed -i -e "s|^;listen.group = nobody|listen.group = nginx|" /etc/php-fpm.d/www.conf
+    cp /etc/php-fpm.d/www.conf /etc/php-fpm.d/www.conf.orig
+    cat > /etc/php-fpm.d/www.conf <<'EOF'
+[www]
+user = nginx
+group = nginx
+listen = /run/php-fpm/www.sock
+listen.owner = nginx
+listen.group = nginx
+listen.mode = 0660
+pm = dynamic
+pm.max_children = 50
+pm.start_servers = 5
+pm.min_spare_servers = 5
+pm.max_spare_servers = 35
+pm.max_requests = 500
+EOF
     end_message "php-fpmプールの設定"
 
     # nginx.confをBuildree用に書き換え
@@ -401,6 +415,11 @@ Nginx + PHPインストール完了！
 アクセス方法:
 - http://IPアドレス or ドメイン名
 - https://IPアドレス or ドメイン名
+
+PHPの動作確認:
+- http://IPアドレス or ドメイン名/info.php にアクセスするとphpinfo()の内容が表示されます
+- 確認後はセキュリティのため info.php を削除することを推奨します
+  (rm -f /var/www/html/info.php)
 
 設定ファイル: /etc/nginx/conf.d/buildree.conf
 ドキュメントルート: /var/www/html

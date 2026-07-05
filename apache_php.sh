@@ -351,6 +351,11 @@ Apacheインストール完了！
 - http://IPアドレス or ドメイン名
 - https://IPアドレス or ドメイン名
 
+PHPの動作確認:
+- http://IPアドレス or ドメイン名/info.php にアクセスするとphpinfo()の内容が表示されます
+- 確認後はセキュリティのため info.php を削除することを推奨します
+  (rm -f /var/www/html/info.php)
+
 設定ファイル: /etc/httpd/conf.d/ドメイン名.conf
 ドキュメントルート: /var/www/html
 
