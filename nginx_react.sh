@@ -45,6 +45,12 @@ read -p "インストールを続行しますか？ (y/n): " choice
 # プロジェクト名の設定
 read -p "Reactプロジェクト名を入力してください (デフォルト: buildree-app): " PROJECT_NAME
 PROJECT_NAME=${PROJECT_NAME:-buildree-app}
+# 安全のため英数字・ハイフン・アンダースコアのみ許可
+# (パストラバーサルやコマンドインジェクションを防ぐため)
+if ! echo "$PROJECT_NAME" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+    echo "エラー: プロジェクト名は英数字・ハイフン・アンダースコアのみ使用できます"
+    exit 1
+fi
 echo "プロジェクト名: $PROJECT_NAME"
 
 # ディストリビューションとバージョンの検出
