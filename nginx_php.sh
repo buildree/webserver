@@ -370,6 +370,15 @@ EOF
 
     # サービス設定
     start_message "サービス設定"
+    # nginx.org公式パッケージの既知の不具合対策:
+    # 再起動時に古い/run/nginx.pidが残っているとPermission deniedで
+    # 起動に失敗することがあるため、起動前に必ず削除するようにする
+    mkdir -p /etc/systemd/system/nginx.service.d
+    cat > /etc/systemd/system/nginx.service.d/override.conf <<'EOF'
+[Service]
+ExecStartPre=/usr/bin/rm -f /run/nginx.pid
+EOF
+    systemctl daemon-reload
     systemctl start php-fpm.service
     systemctl enable php-fpm
     systemctl start nginx.service

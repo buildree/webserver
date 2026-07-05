@@ -16,21 +16,24 @@ echo ""
 # 起動メッセージ
 cat <<EOF
 -----------------------------------------------------
-Buildree Nginx インストールスクリプト
+Buildree Nginx & React (Vite + TypeScript) インストールスクリプト
 -----------------------------------------------------
 注意点：
   - AlmaLinux、Rocky Linux、RHEL、CentOS Stream、Oracle Linux専用
   - rootユーザーまたはsudo権限が必要
   - 新規環境での使用を推奨
   - 実行前にバックアップを推奨
-  - nginxは.htaccessに対応していません。ディレクトリ単位の設定は
-    /etc/nginx/conf.d/以下の設定ファイルで行ってください
+  - Reactアプリは静的ファイルにビルドしてnginxで配信します
+    (Node.jsはビルド時のみ使用し、常駐サーバーは起動しません)
 
 目的：
   - nginxのインストール（nginx.org公式リポジトリの安定版）
   - SSL設定（OpenSSLによる自己署名証明書、mod_sslは使用しません）
   - gzip圧縮の有効化
   - サーバーバージョン情報の非表示
+  - Node.jsのインストール（ビルド用）
+  - Vite + React + TypeScriptプロジェクトの作成・ビルド・配信
+  - React Router等のクライアントサイドルーティング対応
   - unicornユーザーの自動作成
 
 ドキュメントルート: /var/www/html
@@ -38,6 +41,11 @@ EOF
 
 read -p "インストールを続行しますか？ (y/n): " choice
 [ "$choice" != "y" ] && { echo "インストールを中止しました。"; exit 0; }
+
+# プロジェクト名の設定
+read -p "Reactプロジェクト名を入力してください (デフォルト: buildree-app): " PROJECT_NAME
+PROJECT_NAME=${PROJECT_NAME:-buildree-app}
+echo "プロジェクト名: $PROJECT_NAME"
 
 # ディストリビューションとバージョンの検出
 if [ -f /etc/os-release ]; then
@@ -95,17 +103,78 @@ EOF
         nginx -v
         end_message "nginxのインストール"
 
-        # ドキュメントルートの作成
-        start_message "ドキュメントルートの作成"
+        # Node.jsのインストール（ビルド用）
+        # EL10のAppStreamにはnodejs:20ストリームが無いため、EL10のみnodejs:22を使用
+        if [ "$DIST_VER" = "10" ]; then
+            NODEJS_STREAM="22"
+        else
+            NODEJS_STREAM="20"
+        fi
+        start_message "Node.jsのインストール"
+        dnf module reset -y nodejs
+        dnf module install -y nodejs:${NODEJS_STREAM}
+        echo "インストールされたNode.jsのバージョン:"
+        node -v
+        echo "インストールされたnpmのバージョン:"
+        npm -v
+        end_message "Node.jsのインストール"
+
+        # unicornユーザー作成
+        start_message "unicornユーザー作成"
+        USERNAME='unicorn'
+        PASSWORD=$(< /dev/urandom tr -dc '[:alnum:]' | head -c32)
+
+        useradd -m -s /bin/bash $USERNAME
+        if [ $? -ne 0 ]; then
+            echo "ユーザー作成に失敗しました。"
+            exit 1
+        fi
+        echo "$PASSWORD" | passwd --stdin $USERNAME
+
+        mkdir -p /home/${USERNAME}/.ssh
+        chmod 700 /home/${USERNAME}/.ssh
+        ssh-keygen -t ed25519 -N "" -f /home/${USERNAME}/.ssh/${USERNAME}
+        chmod 644 /home/${USERNAME}/.ssh/${USERNAME}.pub
+        chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
+        cat /home/${USERNAME}/.ssh/${USERNAME}.pub >> /home/${USERNAME}/.ssh/authorized_keys
+        chmod 600 /home/${USERNAME}/.ssh/authorized_keys
+        chmod 600 /home/${USERNAME}/.ssh/${USERNAME}
+        cp /home/${USERNAME}/.ssh/${USERNAME} /home/${USERNAME}/
+        chown ${USERNAME}:${USERNAME} /home/${USERNAME}/${USERNAME}
+        rm /home/${USERNAME}/.ssh/${USERNAME}
+
+        echo "ed25519 SSH鍵が生成されました。"
+        echo "秘密鍵: /home/${USERNAME}/${USERNAME}"
+        echo "公開鍵: /home/${USERNAME}/.ssh/${USERNAME}.pub"
+        echo "秘密鍵が /home/${USERNAME}/${USERNAME} に移動されました。"
+        echo "秘密鍵のパーミッションは 600 に設定されています。"
+        echo "このファイルを安全な方法でクライアントマシンに移動し、サーバーからは削除することを強く推奨します。"
+        echo "秘密鍵はサーバー上に保管せず、使用するクライアントマシンにのみ保管してください。"
+        echo "公開鍵をクライアントマシンの ~/.ssh/authorized_keys ファイルに追加してください。"
+        echo "必要に応じて、秘密鍵にパスフレーズを設定してください。"
+        echo "ユーザーのパスワードはランダムで生成されています。セキュリティの関係上表示したりファイルに残していないので新しく設定してください。"
+        end_message "unicornユーザー作成"
+
+        # Reactアプリケーション(Vite + React + TypeScript)のインストール
+        start_message "Reactアプリケーションのインストール"
         mkdir -p /var/www/html
-        cat > /var/www/html/index.html <<'EOF'
-<!DOCTYPE html>
-<html lang="ja">
-<head><meta charset="UTF-8"><title>Buildree</title></head>
-<body><h1>nginxのインストールが完了しました</h1></body>
-</html>
-EOF
-        end_message "ドキュメントルートの作成"
+        mkdir -p /var/www/$PROJECT_NAME
+        chown -R unicorn:nginx /var/www/$PROJECT_NAME
+
+        echo "Vite + React + TypeScriptプロジェクトを作成しています..."
+        su - unicorn -c "cd /var/www/$PROJECT_NAME && npm create vite@latest . -- --template react-ts --no-interactive"
+
+        echo "依存パッケージをインストールしています..."
+        su - unicorn -c "cd /var/www/$PROJECT_NAME && npm install"
+
+        echo "Reactアプリをビルドしています..."
+        su - unicorn -c "cd /var/www/$PROJECT_NAME && npm run build"
+
+        echo "ビルド結果を/var/www/htmlに配置しています..."
+        cp -r /var/www/$PROJECT_NAME/dist/* /var/www/html/
+        chown -R unicorn:nginx /var/www/html
+        chmod 750 /var/www/html
+        end_message "Reactアプリケーションのインストール"
 
         # nginxの設定変更
         start_message "nginx設定"
@@ -164,6 +233,7 @@ EOF
         fi
         end_message "SSL証明書の作成"
 
+        # SPAルーティング対応(React Router等) - $uriが見つからなければindex.htmlにフォールバック
         echo "Buildree用のサーバーブロックを作成しています..."
         cat > /etc/nginx/conf.d/buildree.conf <<'EOF'
 server {
@@ -171,10 +241,10 @@ server {
     listen       [::]:80;
     server_name  _;
     root         /var/www/html;
-    index        index.html index.htm;
+    index        index.html;
 
     location / {
-        try_files $uri $uri/ =404;
+        try_files $uri $uri/ /index.html;
     }
 }
 
@@ -183,7 +253,7 @@ server {
     listen       [::]:443 ssl;
     server_name  _;
     root         /var/www/html;
-    index        index.html index.htm;
+    index        index.html;
 
     ssl_certificate     /etc/nginx/ssl/buildree.crt;
     ssl_certificate_key /etc/nginx/ssl/buildree.key;
@@ -191,7 +261,7 @@ server {
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
     location / {
-        try_files $uri $uri/ =404;
+        try_files $uri $uri/ /index.html;
     }
 }
 EOF
@@ -211,48 +281,6 @@ EOF
         start_message "nginx設定チェック"
         nginx -t
         end_message "nginx設定チェック"
-
-        # unicornユーザー作成
-        start_message "unicornユーザー作成"
-        USERNAME='unicorn'
-        PASSWORD=$(< /dev/urandom tr -dc '[:alnum:]' | head -c32)
-
-        useradd -m -s /bin/bash $USERNAME
-        if [ $? -ne 0 ]; then
-            echo "ユーザー作成に失敗しました。"
-            exit 1
-        fi
-        echo "$PASSWORD" | passwd --stdin $USERNAME
-
-        mkdir -p /home/${USERNAME}/.ssh
-        chmod 700 /home/${USERNAME}/.ssh
-        ssh-keygen -t ed25519 -N "" -f /home/${USERNAME}/.ssh/${USERNAME}
-        chmod 644 /home/${USERNAME}/.ssh/${USERNAME}.pub
-        chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
-        cat /home/${USERNAME}/.ssh/${USERNAME}.pub >> /home/${USERNAME}/.ssh/authorized_keys
-        chmod 600 /home/${USERNAME}/.ssh/authorized_keys
-        chmod 600 /home/${USERNAME}/.ssh/${USERNAME}
-        cp /home/${USERNAME}/.ssh/${USERNAME} /home/${USERNAME}/
-        chown ${USERNAME}:${USERNAME} /home/${USERNAME}/${USERNAME}
-        rm /home/${USERNAME}/.ssh/${USERNAME}
-
-        echo "ed25519 SSH鍵が生成されました。"
-        echo "秘密鍵: /home/${USERNAME}/${USERNAME}"
-        echo "公開鍵: /home/${USERNAME}/.ssh/${USERNAME}.pub"
-        echo "秘密鍵が /home/${USERNAME}/${USERNAME} に移動されました。"
-        echo "秘密鍵のパーミッションは 600 に設定されています。"
-        echo "このファイルを安全な方法でクライアントマシンに移動し、サーバーからは削除することを強く推奨します。"
-        echo "秘密鍵はサーバー上に保管せず、使用するクライアントマシンにのみ保管してください。"
-        echo "公開鍵をクライアントマシンの ~/.ssh/authorized_keys ファイルに追加してください。"
-        echo "必要に応じて、秘密鍵にパスフレーズを設定してください。"
-        echo "ユーザーのパスワードはランダムで生成されています。セキュリティの関係上表示したりファイルに残していないので新しく設定してください。"
-        end_message "unicornユーザー作成"
-
-        # ドキュメントルート所有者変更
-        start_message "ドキュメントルート所有者変更"
-        chown -R unicorn:nginx /var/www/html
-        chmod 750 /var/www/html
-        end_message "ドキュメントルート所有者変更"
 
         # SELinuxの状態確認
         # nginxはApacheと同じhttpd_tドメインで動作するため、ドキュメントルートに
@@ -299,18 +327,26 @@ EOF
 
         cat <<EOF
 
-nginxインストール完了！
+Nginx & React (Vite + TypeScript) インストール完了！
 
 アクセス方法:
 - http://IPアドレス or ドメイン名
-- https://IPアドレス or ドメイン名
+- https://IPアドレス or ドメイン名（自己署名証明書、ブラウザ警告あり）
 
 設定ファイル: /etc/nginx/conf.d/buildree.conf
-ドキュメントルート: /var/www/html
+ドキュメントルート: /var/www/html（Viteのビルド成果物 = dist/ の中身を配置済み）
+プロジェクトソース: /var/www/$PROJECT_NAME（src/以下を編集してください）
+
+Reactアプリケーション管理:
+- ソースの編集: /var/www/$PROJECT_NAME/src
+- 再ビルド: su - unicorn -c "cd /var/www/$PROJECT_NAME && npm run build"
+- 再ビルド後は /var/www/$PROJECT_NAME/dist の中身を /var/www/html にコピーしてください
+  (cp -r /var/www/$PROJECT_NAME/dist/* /var/www/html/)
 
 注意:
+- Node.js/npmはビルド時のみ使用しており、常駐サーバーは起動していません
+  (静的ファイルをnginxが直接配信する構成です)
 - HTTPSはOpenSSLで作成した自己署名証明書で有効化済みです(/etc/nginx/ssl/buildree.crt)
-  ブラウザで警告が出ますが、動作確認目的であればそのまま接続できます
 - 本番運用する場合は、Let's Encrypt等の正式な証明書に差し替えてください
   （/etc/nginx/conf.d/buildree.conf のssl_certificate / ssl_certificate_keyを変更）
 - ドキュメントルートの所有者: unicorn
