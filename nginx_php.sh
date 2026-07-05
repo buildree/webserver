@@ -155,8 +155,18 @@ EOF
     end_message "PHP8.2をインストール"
 
     # ドキュメントルートの作成
+    # nginxはApacheと異なりautoindexがデフォルトOFFのため、
+    # index.htmlが無いディレクトリへのアクセスは403になる。
+    # そのためデフォルトのindex.htmlを用意しておく
     start_message "ドキュメントルートの作成"
     mkdir -p /var/www/html
+    cat > /var/www/html/index.html <<'EOF'
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>Buildree</title></head>
+<body><h1>nginx + PHPのインストールが完了しました</h1></body>
+</html>
+EOF
     end_message "ドキュメントルートの作成"
 
     # php-fpmプールをnginxユーザーで動くように設定
