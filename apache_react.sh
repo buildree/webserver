@@ -151,12 +151,8 @@ EOF
     end_message "gzip圧縮設定"
 
     # Node.jsのインストール
-    # EL10のAppStreamにはnodejs:20ストリームが無いため、EL10のみnodejs:22を使用
-    if [ "$DIST_MAJOR_VERSION" -eq 10 ]; then
-        NODEJS_STREAM="22"
-    else
-        NODEJS_STREAM="20"
-    fi
+    # nodejs:20はEOL(2026年4月)のため、EL8/9/10共通でMaintenance LTSのnodejs:22を使用
+    NODEJS_STREAM="22"
     start_message "Node.jsのインストール"
     echo "Node.js ${NODEJS_STREAM}をインストールしています..."
     # まず既存のNodeモジュールをリセット

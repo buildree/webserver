@@ -119,12 +119,8 @@ EOF
         end_message "nginxのインストール"
 
         # Node.jsのインストール（ビルド用）
-        # EL10のAppStreamにはnodejs:20ストリームが無いため、EL10のみnodejs:22を使用
-        if [ "$DIST_VER" = "10" ]; then
-            NODEJS_STREAM="22"
-        else
-            NODEJS_STREAM="20"
-        fi
+        # nodejs:20はEOL(2026年4月)のため、EL8/9/10共通でMaintenance LTSのnodejs:22を使用
+        NODEJS_STREAM="22"
         start_message "Node.jsのインストール"
         dnf module reset -y nodejs
         dnf module install -y nodejs:${NODEJS_STREAM}
