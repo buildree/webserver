@@ -177,7 +177,7 @@ EOF
         chown -R unicorn:nginx /var/www/$PROJECT_NAME
 
         echo "Vite + React + TypeScriptプロジェクトを作成しています..."
-        su - unicorn -c "cd /var/www/$PROJECT_NAME && npm create vite@latest . -- --template react-ts --no-interactive"
+        su - unicorn -c "cd /var/www/$PROJECT_NAME && npm create vite@latest . -y -- --template react-ts"
 
         echo "依存パッケージをインストールしています..."
         su - unicorn -c "cd /var/www/$PROJECT_NAME && npm install"

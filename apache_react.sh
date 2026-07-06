@@ -238,7 +238,7 @@ chown -R unicorn:apache /var/www/$PROJECT_NAME
 
 # unicornユーザーとしてVite(react-tsテンプレート)でプロジェクトを作成
 echo "Vite + React + TypeScriptプロジェクトを作成しています..."
-su - unicorn -c "cd /var/www/$PROJECT_NAME && npm create vite@latest . -- --template react-ts --no-interactive"
+su - unicorn -c "cd /var/www/$PROJECT_NAME && npm create vite@latest . -y -- --template react-ts"
 
 # 依存パッケージのインストール
 echo "依存パッケージをインストールしています..."
