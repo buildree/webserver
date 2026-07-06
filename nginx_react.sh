@@ -119,11 +119,23 @@ EOF
         end_message "nginxのインストール"
 
         # Node.jsのインストール（ビルド用）
-        # nodejs:20はEOL(2026年4月)のため、EL8/9/10共通でMaintenance LTSのnodejs:22を使用
-        NODEJS_STREAM="22"
+        # EL10のAppStreamはnodejsがモジュール化されておらず通常パッケージのため、
+        # EL8/9はdnfモジュール、EL10は通常パッケージとしてインストールを分ける。
+        # nodejs:20はEOL(2026年4月)のため、モジュール版はMaintenance LTSのnodejs:22を使用
         start_message "Node.jsのインストール"
-        dnf module reset -y nodejs
-        dnf module install -y nodejs:${NODEJS_STREAM}
+        if [ "$DIST_VER" = "10" ]; then
+            dnf install -y nodejs
+        else
+            NODEJS_STREAM="22"
+            dnf module reset -y nodejs
+            # commonプロファイルにnode/npm本体が含まれる。ストリームによってはデフォルトプロファイルが無く、
+            # プロファイル省略だとdnfがエラーになるため明示指定する
+            dnf module install -y nodejs:${NODEJS_STREAM}/common
+        fi
+        if ! command -v npm > /dev/null 2>&1; then
+            echo "エラー: Node.js/npmのインストールに失敗しました。上記のdnfのエラー内容を確認してください。"
+            exit 1
+        fi
         echo "インストールされたNode.jsのバージョン:"
         node -v
         echo "インストールされたnpmのバージョン:"
